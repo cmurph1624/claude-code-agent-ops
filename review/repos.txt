@@ -1,0 +1,7 @@
+# Repos the PR reviewer watches: ~/dev directory names, one per line.
+#   *        every ~/dev repo whose origin is github.com/<REVIEW_OWNER>/*
+#   !name    exclude, even under *
+# The pr-review-loop hook reads this file too, so a session only waits on repos listed here.
+example-web
+example-api
+example-daemon

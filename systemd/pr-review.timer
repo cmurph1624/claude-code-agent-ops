@@ -1,0 +1,9 @@
+[Unit]
+Description=Poll watched repos for PRs to review every 2 minutes
+
+[Timer]
+OnCalendar=*:0/2
+Persistent=false
+
+[Install]
+WantedBy=timers.target

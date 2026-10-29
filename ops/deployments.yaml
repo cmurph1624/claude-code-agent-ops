@@ -1,0 +1,65 @@
+# Deploy registry, the source of truth for the ops agent (claude/agents/ops.md) and ops/status.py.
+#
+# This file is an EXAMPLE. Replace the projects below with your own. Each key is a project name the
+# deploy skill accepts; `dir` is its checkout under ~/dev.
+#
+# Fields
+#   dir         checkout under ~/dev
+#   branch      what production tracks
+#   live_checkout: true   the service runs straight from `dir`, so a checkout there IS a deploy
+#   merge_deploys: true   merging a PR deploys it (so the deploy gate prompts on `gh pr merge` there)
+#   mechanism   gha | script | compose | vercel | artifact | none
+#               artifact = a claude.ai artifact page. The ops agent preflights and builds the bundle;
+#               the main session publishes it (the agent has no Artifact tool). See `publish`.
+#   artifact_url  the claude.ai artifact a mechanism: artifact project publishes to
+#   deploy      shell steps run from `dir`; {ref} is the commit/tag being deployed
+#   health      shell command, exit 0 = healthy (retried up to ~60s)
+#   verify      non-shell check, for projects with no health command
+#   rollback    how to go back; usually the deploy steps with {ref} = the recorded previous ref
+#   confirm     reasons the agent must get the user's explicit go-ahead first, even on a direct ask
+#   cautions    read these before touching the project
+
+projects:
+  # A web app deployed by a dispatch-triggered GitHub Actions workflow. Merging to main also
+  # deploys, so the deploy gate prompts on `gh pr merge` here.
+  example-web:
+    dir: example-web
+    branch: main
+    merge_deploys: true
+    live_checkout: false
+    mechanism: gha
+    deploy: gh workflow run deploy.yml -R your-user/example-web -f ref={ref}
+    watch: gh run watch -R your-user/example-web $(gh run list -R your-user/example-web -w deploy.yml -L1 --json databaseId -q '.[0].databaseId') --exit-status
+    health: curl -fsS -m 5 http://127.0.0.1:3001/healthz
+    rollback: same workflow with ref=<previous SHA>
+    cautions:
+      - A push to main already deploys. Only dispatch for redeploys or rollbacks.
+
+  # A service built and run with Docker Compose from its checkout.
+  example-api:
+    dir: example-api
+    branch: main
+    live_checkout: false   # the image is built from the checkout; the running container is what matters
+    mechanism: compose
+    deploy: |
+      git fetch origin && git checkout --detach {ref}
+      docker compose up -d --build --wait
+    health: curl -fsS -m 5 http://127.0.0.1:3456/health
+    rollback: same steps with ref=<previous SHA>
+    cautions:
+      - Never `docker compose down -v`; the database lives in a named volume.
+
+  # A systemd user service that runs straight from its ~/dev checkout, so changing files there
+  # IS the deploy. Do branch work in a worktree.
+  example-daemon:
+    dir: example-daemon
+    branch: main
+    live_checkout: true
+    mechanism: script
+    deploy: |
+      git fetch origin && git checkout --detach {ref}
+      npm ci && systemctl --user restart example-daemon
+    health: systemctl --user is-active --quiet example-daemon
+    rollback: same steps with ref=<previous SHA>
+    confirm:
+      - Restarting drops open connections. Ask the user before deploying during working hours.

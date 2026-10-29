@@ -1,0 +1,26 @@
+# Areas for a one-time full-codebase sweep of example-web (see sweep/sweep.py). Each area gets its own
+# read-only review. `focus` tells the reviewer what matters most there.
+repo: your-user/example-web
+base: main
+areas:
+  auth-security:
+    paths: [src/lib/auth, src/middleware.ts, src/app/login, migrations]
+    focus: >-
+      Authentication and authorization end to end: every route and query scoped to the signed-in
+      user, row-level security in every migration, secrets never reaching the client, and session
+      handling.
+  api:
+    paths: [src/app/api, src/lib/integrations]
+    focus: >-
+      API routes and third-party integrations: authz on every route, input validation, webhook
+      signature checks, idempotency of sync jobs, and error paths.
+  data-layer:
+    paths: [src/lib/data, src/lib/server-actions.ts]
+    focus: >-
+      Query correctness, N+1 patterns, transactions where several writes must succeed together,
+      swallowed errors, and type safety at the DB boundary.
+  ui:
+    paths: [src/app, src/components]
+    focus: >-
+      Server/client component boundaries, stale data after mutations, form validation and error
+      states, and accessibility basics. Skip pure styling.
