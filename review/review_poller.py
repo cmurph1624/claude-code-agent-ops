@@ -24,11 +24,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import (CACHE, HERE, MAX_REVIEWS, OWNER, STATE, encode_data, parse_review,  # noqa: E402
-                    pr_comments, request_file, run, watched_repos)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # agent-ops root, for usage.guard
+from common import (CACHE, HERE, MAX_REVIEWS, OWNER, STATE, encode_data, is_docs_only,  # noqa: E402
+                    parse_review, pr_comments, request_file, run, watched_repos)
 
 CLAUDE = os.environ.get("CLAUDE_BIN", str(Path.home() / ".local/bin/claude"))
-MODEL = os.environ.get("REVIEW_MODEL")  # unset = the CLI's default model
+# Sonnet by default, to keep review cost down. Set REVIEW_MODEL to override; an empty value
+# uses the CLI's default.
+MODEL = os.environ.get("REVIEW_MODEL", "claude-sonnet-5-5")
 REVIEW_TIMEOUT = 20 * 60
 MAX_FAILURES = 3  # per head SHA; alert on the first, give up after this many
 # Optional Slack alerts: a script called as `node <script> <headline> 1` with the detail on stdin,
@@ -201,7 +204,7 @@ def handle(dirname, slug, pr, args, since):
     if forced and not args.force and any(r["sha"] == sha for r in st["reviews"]):
         log(f"{key}: {sha[:8]} already reviewed (use --force)")
         return
-    rnd = len(st["reviews"]) + 1
+    rnd = len([r for r in st["reviews"] if not r.get("skipped")]) + 1
     if rnd > MAX_REVIEWS and not args.force:
         if not args.dry_run:
             run(["gh", "pr", "comment", str(n), "-R", slug, "--body",
@@ -211,6 +214,10 @@ def handle(dirname, slug, pr, args, since):
             st["capped_sha"] = sha
             save_state(key, st)
         log(f"{key}: review cap reached at {sha[:8]}")
+        return
+
+    if not forced and docs_only(slug, n):
+        skip_docs(key, slug, st, pr, rnd, args)
         return
 
     log(f"{key}: reviewing {sha[:8]} round {rnd}")
@@ -237,6 +244,52 @@ def handle(dirname, slug, pr, args, since):
     save_state(key, st)
 
 
+def docs_only(slug, number):
+    """The PR's changed files are all documentation. Errors mean "review it" (fail safe)."""
+    try:
+        out = run(["gh", "pr", "diff", str(number), "-R", slug, "--name-only"]).stdout
+        return is_docs_only([p for p in out.splitlines() if p.strip()])
+    except Exception as e:  # noqa: BLE001
+        log(f"{slug}#{number}: couldn't list changed files ({e}); reviewing")
+        return False
+
+
+def skip_docs(key, slug, st, pr, rnd, args):
+    """Post a clean verdict without calling Claude, so the author's review loop can finish."""
+    sha = pr["headRefOid"]
+    res = {"summary": "Docs-only change: every file is documentation, so the automated code "
+                      "review was skipped. Prompt, skill, agent and CLAUDE.md files are never "
+                      "treated as docs.",
+           "verdict": "clean", "findings": [], "cost_usd": 0, "skipped": "docs-only"}
+    log(f"{key}: {sha[:8]} docs-only, review skipped")
+    if args.dry_run:
+        print(render(pr, rnd, res))
+        return
+    run(["gh", "pr", "comment", str(pr["number"]), "-R", slug, "--body-file", "-"],
+        input=render(pr, rnd, res))
+    st["reviews"].append({"sha": sha, "round": rnd, "verdict": "clean", "skipped": "docs-only",
+                          "at": datetime.now(timezone.utc).isoformat()})
+    save_state(key, st)
+
+
+def governor_paused():
+    """Timer runs hold off while usage is at 75%+ without an override; PRs wait, nothing is lost.
+    Logged once per pause, not every 2 minutes."""
+    try:
+        from usage.guard import paused
+        why = paused()
+    except Exception:  # noqa: BLE001  fail open
+        why = None
+    flag = STATE / "governor-paused"
+    if why and not flag.exists():
+        log(f"governor: pausing reviews ({why}); `usage override 2h` to resume")
+        flag.write_text(why)
+    elif not why and flag.exists():
+        log("governor: reviews resumed")
+        flag.unlink()
+    return bool(why)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", help="~/dev dir name; limits the run to this repo")
@@ -253,6 +306,8 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print("another poller run is active", file=sys.stderr)
+        return
+    if not args.pr and governor_paused():
         return
     since = since_cutoff()
     repos = watched_repos()

@@ -1,0 +1,10 @@
+[Unit]
+Description=Claude usage governor: scan transcripts, read limits, update the gate, alert (agent-ops/usage)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/dev/agent-ops
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/dev/agent-ops/bin/usage poll
+TimeoutStartSec=5min
+Nice=10

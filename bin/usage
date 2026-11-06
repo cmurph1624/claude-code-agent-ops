@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""`usage` CLI shim: runs agent-ops' usage package from wherever it's symlinked."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from usage.__main__ import main  # noqa: E402
+
+sys.exit(main())

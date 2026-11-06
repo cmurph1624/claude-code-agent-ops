@@ -83,9 +83,16 @@ issues: one per blocker or major finding, and a roll-up per area for minor ones.
 --max N` then fixes blocker and major issues one PR at a time: worktree, headless fix, test and
 lint gates, PR, and up to 2 review rounds. It never merges.
 
+### 6. Usage governor (`usage/`, `claude/hooks/usage-flag.py`)
+Keeps automation from burning through the Claude subscription. A status line and a 5-minute timer
+track the 5-hour and weekly limits. At 75% on either one, PR reviews, sweeps and other headless
+runs pause, and in interactive sessions subagents, workflows, `claude -p` and PR pushes ask for
+approval. `usage override 2h` lifts the pause. `usage report` breaks spending down by source,
+model, session and day from the local transcripts. See [`usage/README.md`](usage/README.md).
+
 ## Install
 
-Requirements: Linux with systemd user units, Python 3 with PyYAML, the `gh` CLI (authenticated),
+Requirements: Linux with systemd user units, Python 3.11+ with PyYAML, the `gh` CLI (authenticated),
 and the `claude` CLI.
 
 ```bash
@@ -121,4 +128,7 @@ python3 ops/status.py                                             # drift + heal
 systemctl --user stop pr-review.timer                             # pause reviews
 ```
 
-`REVIEW_MODEL` overrides the reviewer's model (unset means the CLI default).
+The reviewer runs on Sonnet 5.5 (`claude-sonnet-5-5`). `REVIEW_MODEL` overrides it, and an
+empty value means the CLI default. PRs that change only documentation (`.md`, `.txt`, `docs/`…)
+get a clean verdict without a Claude call; prompt, skill, agent, command and `CLAUDE.md` files
+count as code (`is_docs_only` in `review/common.py`).
