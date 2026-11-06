@@ -218,10 +218,12 @@ def review_loop(repo, n, pr, wt, base_t, base_l, first_round, L):
             t_ok, l_ok, tail = gates(wt)
             if (base_t and not t_ok) or (base_l and not l_ok):
                 run(["git", "checkout", "--", "."], cwd=wt)
+                run(["git", "clean", "-fdq"], cwd=wt)  # also drop files the round added
                 replies += f"\n\n⚠️ The round-{rnd + 1} changes broke tests or lint, so they were discarded."
                 run(["gh", "pr", "comment", str(pr), "-R", repo, "--body-file", "-"], input=replies)
                 break
-            run(["git", "commit", "-qam", f"Address review round {rnd + 1}{TRAILER}"], cwd=wt)
+            run(["git", "add", "-A"], cwd=wt)  # -a alone would miss new files (tests, migrations)
+            run(["git", "commit", "-q", "-m", f"Address review round {rnd + 1}{TRAILER}"], cwd=wt)
             run(["git", "push", "-q"], cwd=wt)
             run(["gh", "pr", "comment", str(pr), "-R", repo, "--body-file", "-"], input=replies)
         else:  # everything rebutted: nothing new to review
