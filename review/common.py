@@ -77,6 +77,31 @@ def slug_for_dir(path):
     return slug if slug in watched_repos().values() else None
 
 
+DOC_SUFFIXES = (".md", ".mdx", ".rst", ".txt", ".adoc")
+DOC_NAMES = {"LICENSE", "NOTICE", "AUTHORS", "CHANGELOG", "CODEOWNERS"}
+# Markdown that steers an agent is behaviour, not documentation: cron job prompts, skills,
+# agents, slash commands, CLAUDE.md, the reviewer's own prompt.
+BEHAVIOUR_MD = ("prompt", "skill.md", "claude.md", "agents.md", "context.md")
+BEHAVIOUR_DIRS = (".claude/", "skills/", "agents/", "commands/", "prompts/")
+
+
+def is_docs_only(paths):
+    """True when every changed file is plain documentation (top level or under docs/), so a code review adds nothing."""
+    if not paths:
+        return False
+    for p in paths:
+        low = p.lower()
+        name = low.rsplit("/", 1)[-1]
+        if any(d in "/" + low for d in ("/" + d for d in BEHAVIOUR_DIRS)) or \
+                any(k in name for k in BEHAVIOUR_MD):
+            return False
+        # Only top-level files and docs/ count. A doc file elsewhere may be read by a script that sits
+        # beside it (e.g. a known-issues list appended to a prompt), which a name check can't see.
+        if not (low.startswith("docs/") or ("/" not in p and (name.endswith(DOC_SUFFIXES) or p in DOC_NAMES))):
+            return False
+    return True
+
+
 def request_file(slug, number):
     """A waiting author drops this to ask for a review the timer would otherwise skip (pre-cutoff PRs)."""
     return STATE / "requests" / f"{slug.split('/')[1]}-{number}"
@@ -105,10 +130,24 @@ def pr_comments(slug, number):
 CLAUDE = os.environ.get("CLAUDE_BIN", str(Path.home() / ".local/bin/claude"))
 
 
+def _governor_paused():
+    """The usage governor's pause reason, or None. Fails open."""
+    try:
+        import sys
+        sys.path.insert(0, str(HERE.parent))
+        from usage.guard import paused
+        return paused()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def claude_json(prompt, cwd, schema, tools, allowed, mode="dontAsk", timeout=30 * 60, model=None):
     """Run `claude -p` headless and return (structured_output, raw result). Raises on failure.
     Bills the subscription login like the cron jobs: an inherited API key and parent-session
     markers are stripped from the environment."""
+    why = _governor_paused()
+    if why:
+        raise RuntimeError(f"usage limit: governor paused this run ({why}); `usage override 2h` to go on")
     env = {k: v for k, v in os.environ.items()
            if k != "ANTHROPIC_API_KEY" and not k.startswith("CLAUDE_CODE_") and k != "CLAUDECODE"}
     cmd = [CLAUDE, "-p", "--output-format", "json", "--json-schema", json.dumps(schema),

@@ -1,0 +1,58 @@
+# How a call's working directory (and entrypoint) maps to a usage source. First match wins.
+# `cwd` is a regex matched against the call's cwd with the home directory written as "~".
+# `entrypoint` (optional): "cli" = interactive Claude Code, "sdk-cli" = `claude -p`.
+# `source` may use {1}, {2}... for regex groups. A tag in tags.jsonl beats every rule.
+
+[[rule]]
+cwd = '^~/\.cache/pr-review/([^/]+)'
+source = "review:{1}"
+
+[[rule]]
+cwd = '^~/\.cache/sweep-fix/(.+?)-\d+(/|$)'
+source = "sweep-fix:{1}"
+
+[[rule]]
+cwd = '^~/\.cache/sweep/([^/]+)'
+source = "sweep:{1}"
+
+# Your own headless agents and benchmarks: match the directory they run in. Examples:
+[[rule]]
+cwd = '^~/\.local/share/(agent-[a-z]+)'
+source = "agent:{1}"
+
+[[rule]]
+cwd = '^/tmp/bench-'
+source = "benchmark:example"
+
+# A directory shared by several cron jobs: untagged runs land here (tags in tags.jsonl split them).
+[[rule]]
+cwd = '^~/dev/cron-jobs'
+entrypoint = "sdk-cli"
+source = "cron:untagged"
+
+[[rule]]
+cwd = '^~/dev/([^/]+)'
+entrypoint = "sdk-cli"
+source = "headless:{1}"
+
+[[rule]]
+cwd = '^~/dev/([^/]+)'
+source = "interactive:{1}"
+
+[[rule]]
+cwd = '^~/dev$'
+source = "interactive:~/dev"
+
+[[rule]]
+cwd = '^~/([^/.][^/]*)'
+entrypoint = "cli"
+source = "interactive:~/{1}"
+
+[[rule]]
+cwd = '^~$'
+entrypoint = "cli"
+source = "interactive:~"
+
+[[rule]]
+cwd = '(.*)'
+source = "other:{1}"
